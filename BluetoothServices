@@ -1,0 +1,75 @@
+//
+//  BluetoothServices.swift
+//  DanaBLE
+//
+//  Created by Alen Djonko on 16.01.23.
+//
+
+import CoreBluetooth
+
+protocol CBUUIDRawValue: RawRepresentable {}
+extension CBUUIDRawValue where RawValue == String {
+    var cbUUID: CBUUID {
+        return CBUUID(string: rawValue)
+    }
+}
+
+enum DanaCommand: UInt16 {
+    case START = 0xA5
+    case END = 0x5A
+    // DanaI uses BLE5
+    case BLE5_START = 0xAA
+    case BLE5_END = 0xEE
+}
+
+enum DanaServiceUUID: String, CBUUIDRawValue {
+    case read = "0000fff1-0000-1000-8000-00805f9b34fb"
+    case write = "0000fff2-0000-1000-8000-00805f9b34fb"
+    case ble5 = "00002902-0000-1000-8000-00805f9b34fb"
+}
+
+enum DanaCharacteristicUUID: UInt16 {
+    case request = 0x01
+    case response = 0x02
+}
+
+extension PeripheralManager.Configuration {
+    static var dana: PeripheralManager.Configuration {
+        return PeripheralManager.Configuration(
+            serviceCharacteristics: [
+                DanaServiceUUID.service.cbUUID: [
+                    DanaCharacteristicUUID.request.self,
+                    DanaCharacteristicUUID.response.self,
+                ]
+            ],
+            notifyingCharacteristics: [
+                DanaServiceUUID.service.cbUUID: [
+                    DanaCharacteristicUUID.request.self,
+                    DanaCharacteristicUUID.response.self,
+                ]
+            ],
+            valueUpdateMacros: [
+                DanaCharacteristicUUID.request.rawValue: { (manager: PeripheralManager) in
+                    guard let characteristic = manager.peripheral.getCommandCharacteristic() else { return }
+                    guard let value = characteristic.value else { return }
+
+                    manager.log.default("CMD <<< %{public}@", value.hexadecimalString)
+                    manager.queueLock.lock()
+                    manager.cmdQueue.append(value)
+                    manager.queueLock.signal()
+                    manager.queueLock.unlock()
+                },
+                DanaCharacteristicUUID.response.rawValue: { (manager: PeripheralManager) in
+                    guard let characteristic = manager.peripheral.getDataCharacteristic() else { return }
+                    guard let value = characteristic.value else { return }
+
+                    manager.log.default("DATA <<< %{public}@", value.hexadecimalString)
+                    manager.queueLock.lock()
+                    manager.dataQueue.append(value)
+                    manager.queueLock.signal()
+                    manager.queueLock.unlock()
+                }
+            ]
+        )
+    }
+}
